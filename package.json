@@ -1,0 +1,39 @@
+{
+  "name": "admin-web-template",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "会员空间平台 · 工作台前端模板（Vite+React+TS+TDesign+Vitest+MSW）。全部数据为自拟虚构数据。",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview --port 5217",
+    "test": "vitest run",
+    "shots": "node scripts/shots.mjs"
+  },
+  "dependencies": {
+    "msw": "^2.4.11",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "tdesign-react": "^1.9.6"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.4.8",
+    "@testing-library/react": "^16.0.1",
+    "@testing-library/user-event": "^14.6.12",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^24.1.1",
+    "playwright-core": "^1.47.2",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2",
+    "vitest": "^2.0.5"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
+  }
+}
