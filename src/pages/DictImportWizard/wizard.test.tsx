@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import Wizard from './index';
 import { errorCsv, MAX_IMPORT_BYTES, parseImport, validateFile } from '../../lib/dictImport';
 import type { ImportResult, Preview } from '../../lib/dictImport';
@@ -87,6 +87,36 @@ describe('向导上传与下载', () => {
     expect(await screen.findByText('部分导入成功')).toBeInTheDocument();
     expect(screen.getByText('成功 2 条，失败 2 条')).toBeInTheDocument();
   });
+
+  it.each([
+    ['预演', 'preview', '生成预演', '选择字典并上传文件', '新增明细'],
+    ['确认', 'confirm', '确认导入', '预演结果', '导入结果'],
+  ])('%s请求真实等待 15 秒后中止，保留当前步骤并可重试', async (stage, path, action, current, next) => {
+    server.use(...createDictImportHandlers());
+    server.use(http.post(`*/api/taxonomy/import/${path}`, async () => {
+      await delay(20000);
+      return HttpResponse.error();
+    }, { once: true }));
+    const { container } = render(<Wizard />);
+    chooseDictionary();
+    selectFile(container, makeFile(fixture));
+    await screen.findByText(/已选择 fixture.csv/);
+    if (stage === '确认') {
+      fireEvent.click(screen.getByRole('button', { name: '生成预演' }));
+      await screen.findByRole('heading', { name: '新增明细' });
+    }
+    const button = screen.getByRole('button', { name: action });
+    const started = performance.now();
+    fireEvent.click(button);
+    expect(button).toBeDisabled();
+    expect(await screen.findByRole('alert', {}, { timeout: 18000 })).toHaveTextContent('请求超时（15 秒），请重试');
+    expect(performance.now() - started).toBeGreaterThanOrEqual(15000);
+    expect(screen.getByRole('heading', { name: current })).toBeInTheDocument();
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(await screen.findByRole('heading', { name: next })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  }, 22000);
 
   it('无可导入行时禁用确认，零错误页隐藏下载', async () => {
     const { container } = render(<Wizard />);

@@ -32,7 +32,7 @@ npm run shots
 
 用 `src/pages/DictImportWizard/index.tsx` 注册 `/admin/taxonomy/import`，保留工作台鉴权和路由守卫。将模板静态资源放在 `/templates/`。模拟服务由 `src/main.tsx` 启动，接入真实服务时移除该启动步骤并通过 `VITE_API_BASE_URL` 配置接口基地址，默认 `/api`。`VITE_MOCK_SLOW_DELAY_MS` 配置模拟延迟。
 
-所有响应使用 `{ code, data, message? }` 信封，成功时 `code` 为 `0`，错误时返回对应 HTTP 状态和 `message`。客户端在 15 秒后停止等待。
+所有响应使用 `{ code, data, message? }` 信封，成功时 `code` 为 `0`，错误时返回对应 HTTP 状态和 `message`。预演和确认请求均在 15 秒后停止等待。超时会显示提示、保留当前步骤并允许重试。`wizard.test.tsx` 使用真实计时和 MSW 延迟响应验证两个请求。确认重试沿用同一个预演 ID。
 
 | 接口 | 请求体 | 成功响应的 data |
 | --- | --- | --- |

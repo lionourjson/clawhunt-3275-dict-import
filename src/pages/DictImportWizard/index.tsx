@@ -17,13 +17,20 @@ export default function DictImportWizard() {
   const pending = useRef(false);
   const step = result ? 2 : preview ? 1 : 0;
 
-  async function run(operation: () => Promise<void>) {
+  async function run(operation: (signal: AbortSignal) => Promise<void>) {
     if (pending.current) return;
     pending.current = true;
     setBusy(true);
     setError('');
-    try { await operation(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '操作失败，请重试'); }
+    const signal = AbortSignal.timeout(15000);
+    try { await operation(signal); }
+    catch (cause) {
+      if (signal.aborted) {
+        setError('请求超时（15 秒），请重试');
+      } else {
+        setError(cause instanceof Error ? cause.message : '操作失败，请重试');
+      }
+    }
     finally {
       pending.current = false;
       setBusy(false);
@@ -45,18 +52,18 @@ export default function DictImportWizard() {
       {error && <div role="alert" style={{ marginTop: 20 }}><Alert theme="error" message={error} /></div>}
       {result ? <Step3Result result={result} onReset={reset} /> : preview ? (
         <Step2Preview preview={preview} busy={busy} onBack={() => { setError(''); setPreview(undefined); }}
-          onConfirm={() => void run(async () => {
-            setResult(await apiPost<{ previewId: string }, ImportResult>(CONFIRM_PATH, { previewId: preview.previewId }, AbortSignal.timeout(15000)));
+          onConfirm={() => void run(async (signal) => {
+            setResult(await apiPost<{ previewId: string }, ImportResult>(CONFIRM_PATH, { previewId: preview.previewId }, signal));
           })} />
       ) : (
         <Step1Upload dictionaryId={dictionaryId} onDictionary={setDictionaryId} file={file} busy={busy}
           onFile={(next) => { setError(''); setFile(next); }} onError={setError} onPreview={() => {
             if (!file || !dictionaryId) return;
-            void run(async () => {
+            void run(async (signal) => {
               const format = validateFile(file);
               const content = await readFile(file);
               parseImport(format, content);
-              setPreview(await apiPost<PreviewInput, Preview>(PREVIEW_PATH, { dictionaryId, format, content }, AbortSignal.timeout(15000)));
+              setPreview(await apiPost<PreviewInput, Preview>(PREVIEW_PATH, { dictionaryId, format, content }, signal));
             });
           }} />
       )}
