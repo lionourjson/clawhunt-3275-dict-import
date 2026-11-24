@@ -41,9 +41,12 @@ export async function apiPost<TBody extends object, T>(path: string, body: TBody
     const error = await res.json().catch(() => null) as Partial<ApiEnvelope<T>> | null;
     throw new ApiError(typeof error?.message === 'string' ? error.message : `接口异常：HTTP ${res.status}`);
   }
-  const env = (await res.json()) as ApiEnvelope<T>;
+  const env = (await res.json().catch(() => null)) as ApiEnvelope<T> | null;
+  if (typeof env?.code !== 'number') {
+    throw new ApiError('接口响应格式不正确，请重试');
+  }
   if (env.code !== 0) {
-    throw new ApiError(env.message ?? '接口返回错误');
+    throw new ApiError(typeof env.message === 'string' ? env.message : '接口返回错误');
   }
   return env.data;
 }

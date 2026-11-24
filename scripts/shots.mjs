@@ -44,6 +44,19 @@ try {
     await page.screenshot({ path: path.join(output, file), animations: 'disabled' });
     console.log(`[shots] ${file} ${marker}`);
   };
+  const waitForTabIndicator = async (label) => {
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForFunction((expected) => {
+      const selected = document.querySelector('.t-tabs__nav-item.t-is-active');
+      const bar = selected?.closest('.t-tabs__nav-wrap')?.querySelector('.t-tabs__bar');
+      if (selected?.textContent?.trim() !== expected || !bar) return false;
+      const tabBounds = selected.getBoundingClientRect();
+      const barBounds = bar.getBoundingClientRect();
+      return barBounds.width > 0 && !bar.getAnimations().some(({ playState }) => playState === 'running')
+        && Math.abs(tabBounds.left - barBounds.left) < 1 && Math.abs(tabBounds.right - barBounds.right) < 1;
+    }, label);
+    console.log(`[shots] 指示条对齐 ${label}`);
+  };
   await page.goto(`${base}/admin/taxonomy/import`);
   // Intercept browser fetch before MSW's service worker, which handles network before Playwright routing.
   await page.evaluate(() => {
@@ -75,11 +88,14 @@ try {
   await shot('01-upload.png', '已选择 example.csv');
   await page.getByRole('button', { name: '生成预演' }).click();
   await page.waitForSelector('text=新增明细');
+  await waitForTabIndicator('新增（1）');
   await page.locator('section').filter({ has: page.getByRole('heading', { name: '预演结果', exact: true }) })
     .screenshot({ path: path.join(output, '02-preview.png'), animations: 'disabled' });
   console.log('[shots] 02-preview.png 预演分类及导入规则');
   for (const [kind, file] of [['新增', 'new'], ['更新', 'update'], ['冲突', 'conflict'], ['错误', 'error']]) {
-    await page.getByText(`${kind}（1）`, { exact: true }).click();
+    const label = `${kind}（1）`;
+    await page.getByText(label, { exact: true }).click();
+    await waitForTabIndicator(label);
     if (kind === '错误') await page.waitForSelector('text=下载错误行 CSV');
     await shot(`02-${file}.png`, `${kind}明细`);
   }

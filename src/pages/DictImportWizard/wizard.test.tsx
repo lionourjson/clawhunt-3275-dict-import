@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { delay, http, HttpResponse } from 'msw';
 import Wizard from './index';
 import Step2Preview from './Step2Preview';
 import { errorCsv, MAX_IMPORT_BYTES, parseImport, validateFile } from '../../lib/dictImport';
+import ImportGuard from '../../auth/ImportGuard';
 import { setDemoActor } from '../../auth/demoAuth';
 import type { ImportResult, Preview } from '../../lib/dictImport';
 import { apiPost } from '../../api/client';
@@ -98,6 +99,28 @@ describe('向导上传与下载', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it.each([
+    ['JSON', 'json', '[null]', 1],
+    ['JSON', 'json', '[{"code":"ok","name":"有效"},{"code":"bad code","name":"条目"}]', 2],
+    ['JSON', 'json', '[{"code":"ok","name":123}]', 1],
+    ['CSV', 'csv', 'code,name\nok,有效\nmissing,  ', 3],
+    ['CSV', 'csv', 'code,name\nok,有效\nextra,名称,多一列', 3],
+  ])('%s 模板包含无效行（%s: %s）时不下载并允许重试', async (label, format, source, line) => {
+    const downloaded = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const endpoint = `*/templates/dict_import_template.${format}`;
+    server.use(http.get(endpoint, () => HttpResponse.text(source)));
+    render(<Wizard />);
+    const downloadButton = () => screen.getByRole('button', { name: `下载 ${label} 模板` });
+    fireEvent.click(downloadButton());
+    expect(await screen.findByRole('alert')).toHaveTextContent(`模板第 ${line} 行的 code 或 name 不合法`);
+    expect(downloaded).not.toHaveBeenCalled();
+    server.use(http.get(endpoint, () => HttpResponse.text(format === 'csv' ? csvTemplate : jsonTemplate)));
+    await waitFor(() => expect(downloadButton()).toBeEnabled());
+    fireEvent.click(downloadButton());
+    await waitFor(() => expect(downloaded.mock.contexts[0]).toHaveAttribute('download', `dict_import_template.${format}`));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('显示四个分类，错误页签可下载，确认后显示部分成功', async () => {
     const { container } = render(<Wizard />);
     const downloaded = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
@@ -116,6 +139,41 @@ describe('向导上传与下载', () => {
     expect(screen.getByText('成功 2 条，失败 2 条')).toBeInTheDocument();
   });
 
+  it.each([
+    ['空响应信封', null],
+    ['缺少所有字段', { code: 0, data: {} }],
+    ['空载荷', { code: 0, data: null }],
+    ['未知状态', { code: 0, data: { status: 'done', added: 1, updated: 1, succeeded: 2, failed: 2 } }],
+    ['负数计数', { code: 0, data: { status: 'partial', added: -1, updated: 3, succeeded: 2, failed: 2 } }],
+    ['小数计数', { code: 0, data: { status: 'partial', added: 0.5, updated: 1.5, succeeded: 2, failed: 2 } }],
+    ['字符串计数', { code: 0, data: { status: 'partial', added: '1', updated: 1, succeeded: 2, failed: 2 } }],
+    ['计数总和矛盾', { code: 0, data: { status: 'partial', added: 1, updated: 1, succeeded: 3, failed: 2 } }],
+    ['状态与失败数矛盾', { code: 0, data: { status: 'success', added: 1, updated: 1, succeeded: 2, failed: 2 } }],
+  ])('确认 HTTP 200/%s 保留预演并用同一预演重试', async (_, envelope) => {
+    server.use(...createDictImportHandlers());
+    const attempted = vi.fn();
+    server.use(http.post('*/api/taxonomy/import/confirm', async ({ request }) => {
+      attempted(await request.json());
+      return HttpResponse.json(envelope);
+    }, { once: true }));
+    const { container } = render(<Wizard />);
+    chooseDictionary();
+    selectFile(container, makeFile(fixture));
+    await screen.findByText(/已选择 fixture.csv/);
+    fireEvent.click(screen.getByRole('button', { name: '生成预演' }));
+    await screen.findByRole('heading', { name: '预演结果' });
+    const button = screen.getByRole('button', { name: '确认导入' });
+    fireEvent.click(button);
+    expect(await screen.findByRole('alert')).toHaveTextContent('响应格式不正确，请重试');
+    expect(screen.getByRole('heading', { name: '预演结果' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '导入结果' })).not.toBeInTheDocument();
+    expect(button).toBeEnabled();
+    const fetchCall = vi.spyOn(globalThis, 'fetch');
+    fireEvent.click(button);
+    expect(await screen.findByText('成功 2 条，失败 2 条')).toBeInTheDocument();
+    expect(JSON.parse(fetchCall.mock.calls[0][1]!.body as string)).toEqual(attempted.mock.calls[0][0]);
+  });
+
   it('错误行导出失败提示，切换身份后不能下载先前预演', async () => {
     const { container } = render(<Wizard />);
     chooseDictionary();
@@ -132,6 +190,70 @@ describe('向导上传与下载', () => {
     fireEvent.click(screen.getByRole('button', { name: '下载错误行 CSV' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('无权下载此预演');
     expect(click).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['预演明细', '确认结果'])('同组织同站点运营身份切换清空旧%s，切回也不恢复', async (stage) => {
+    server.use(...createDictImportHandlers());
+    const { container } = render(<ImportGuard><Wizard /></ImportGuard>);
+    chooseDictionary();
+    selectFile(container, makeFile(fixture));
+    await screen.findByText(/已选择 fixture.csv/);
+    fireEvent.click(screen.getByRole('button', { name: '生成预演' }));
+    await screen.findByRole('heading', { name: '新增明细' });
+    fireEvent.click(screen.getByText('错误（1）'));
+    expect(screen.getByText('invalid code')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载错误行 CSV' })).toBeEnabled();
+    if (stage === '确认结果') {
+      fireEvent.click(screen.getByRole('button', { name: '确认导入' }));
+      await screen.findByText('成功 2 条，失败 2 条');
+    }
+    for (const token of ['demo-operator-peer', 'demo-operator']) {
+      act(() => setDemoActor(token));
+      expect(screen.getByRole('heading', { name: '选择字典并上传文件' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '生成预演' })).toBeDisabled();
+      expect(screen.queryByText('invalid code')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '下载错误行 CSV' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: '导入结果' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/已选择 fixture.csv/)).not.toBeInTheDocument();
+    }
+  });
+
+  it.each([
+    ['preview', '生成预演'],
+    ['confirm', '确认导入'],
+  ])('切换运营身份取消在途 %s，请求迟到时不恢复旧步骤', async (path, action) => {
+    server.use(...createDictImportHandlers());
+    let release = () => {};
+    const resumed = new Promise<void>((resolve) => { release = resolve; });
+    const handled = vi.fn();
+    server.use(http.post(`*/api/taxonomy/import/${path}`, async () => {
+      handled();
+      await resumed;
+      return HttpResponse.json({ code: 0, data: { status: 'success', added: 2, updated: 0, succeeded: 2, failed: 0 } });
+    }, { once: true }));
+    const { container } = render(<ImportGuard><Wizard /></ImportGuard>);
+    chooseDictionary();
+    selectFile(container, makeFile(fixture));
+    await screen.findByText(/已选择 fixture.csv/);
+    if (path === 'confirm') {
+      fireEvent.click(screen.getByRole('button', { name: '生成预演' }));
+      await screen.findByRole('heading', { name: '新增明细' });
+    }
+    const fetchCall = vi.spyOn(globalThis, 'fetch');
+    fireEvent.click(screen.getByRole('button', { name: action }));
+    try {
+      await waitFor(() => expect(handled).toHaveBeenCalledOnce());
+      const signal = fetchCall.mock.calls[0][1]!.signal;
+      expect(signal?.aborted).toBe(false);
+      act(() => setDemoActor('demo-operator-peer'));
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      await act(async () => release());
+    }
+    expect(screen.getByRole('heading', { name: '选择字典并上传文件' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '预演结果' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '导入结果' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it.each([

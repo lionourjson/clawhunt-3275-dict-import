@@ -16,6 +16,21 @@ export interface Preview { previewId: string; ownerId: string; orgId: string; si
 export interface ImportResult { status: 'success' | 'partial'; added: number; updated: number; succeeded: number; failed: number }
 export interface PreviewInput { dictionaryId: string; format: ImportFormat; content: string }
 
+export function isImportResult(value: unknown): value is ImportResult {
+  if (typeof value !== 'object' || value === null) return false;
+  const { status, added, updated, succeeded, failed } = value as Partial<ImportResult>;
+  const validCount = (count: unknown): count is number => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0;
+  if (!validCount(added) || !validCount(updated) || !validCount(succeeded) || !validCount(failed)) return false;
+  return added + updated === succeeded && (status === 'success' && failed === 0 || status === 'partial' && failed > 0);
+}
+
+export function isValidEntry(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  const { code, name } = value as Partial<Entry>;
+  return typeof code === 'string' && /^[a-zA-Z0-9_-]+$/.test(code.trim())
+    && typeof name === 'string' && name.trim().length > 0;
+}
+
 const acceptedMime: Record<ImportFormat, string[]> = {
   csv: ['text/csv', 'text/plain', 'application/csv', 'application/vnd.ms-excel'],
   json: ['application/json', 'text/json', 'text/plain'],
@@ -134,7 +149,7 @@ export async function downloadTemplate(format: ImportFormat) {
   const response = await fetch(new URL(`/templates/${name}`, window.location.href), { signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`模板下载失败：HTTP ${response.status}，请稍后重试`);
   const text = await response.text();
-  const rows = parseImport(format, text);
-  if (!rows.length) throw new Error('模板文件没有数据，请稍后重试');
+  const invalidRow = parseImport(format, text).find(({ value }) => !isValidEntry(value));
+  if (invalidRow) throw new Error(`模板第 ${invalidRow.line} 行的 code 或 name 不合法，请稍后重试`);
   downloadBlob(new Blob([text], { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8' }), name);
 }

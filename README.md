@@ -12,7 +12,7 @@ npm run build
 npm run shots
 ```
 
-在 Vite 输出的地址打开 `/admin/taxonomy/import`。独立演示默认匿名且拒绝访问：在同源浏览器控制台执行 `sessionStorage.setItem('dict-import-demo-actor', 'demo-operator'); location.reload()` 后可使用虚构运营身份。公开演示令牌不是凭证，不可用于生产鉴权。截图脚本通过 `playwright-core` 使用本地 Chrome 或 Edge，可通过环境变量 `CHROME_PATH` 指定浏览器、`SHOTS_PORT` 指定预览端口。七张截图写入 `docs/screenshots/`；脚本检查两种模板和错误 CSV 的浏览器下载、模板 404 注入及当前流程的站外请求。
+在 Vite 输出的地址打开 `/admin/taxonomy/import`。独立演示默认匿名且拒绝访问：在同源浏览器控制台执行 `sessionStorage.setItem('dict-import-demo-actor', 'demo-operator'); location.reload()` 后可使用虚构运营身份。公开演示令牌不是凭证，不可用于生产鉴权。截图脚本通过 `playwright-core` 使用本地 Chrome 或 Edge，可通过环境变量 `CHROME_PATH` 指定浏览器、`SHOTS_PORT` 指定预览端口。七张截图写入 `docs/screenshots/`；脚本等待蓝色指示条的两端与选中页签对齐后截图，并验证两种模板和错误 CSV 的浏览器下载、模板 404 提示及当前流程的站外请求。
 
 | 验证目标 | 位置 |
 | --- | --- |
@@ -33,7 +33,7 @@ npm run shots
 
 `src/App.tsx` 已将 `/admin/taxonomy/import` 包入 `src/auth/ImportGuard.tsx`：匿名和只读身份拒绝访问。`src/auth/demoAuth.ts` 是独立演示身份桩，内置虚构 operator/viewer/跨组织/跨站点身份；`src/api/client.ts` 仅对两条导入接口传 `X-Demo-Actor`。MSW 自行识别身份、角色、字典组织与站点、删除状态、预演所属人及确认时字典修订。**公开 demo token 可被伪造，不能当作生产凭证或完整权限防线。** S2-WB 集成时用宿主的会话与路由守卫替换 `src/auth/`，服务端必须从真实认证上下文校验身份与组织站点，不接受客户端提交的组织字段或 demo token；并将模板静态资源放在 `/templates/`。模拟服务由 `src/main.tsx` 启动，接入真实服务时移除该启动步骤并通过 `VITE_API_BASE_URL` 配置接口基地址，默认 `/api`。`VITE_MOCK_SLOW_DELAY_MS` 配置模拟延迟。
 
-所有响应使用 `{ code, data, message? }` 信封，成功时 `code` 为 `0`，错误时返回对应 HTTP 状态和 `message`。预演和确认请求均在 15 秒后停止等待。超时显示提示、保留当前步骤并允许重试；确认重试沿用同一个预演 ID，服务端须以此实现幂等，不能将客户端取消等同于未提交。mock 延迟后检查取消信号，按会话缓存结果处理迟到提交或重复确认。`wizard.test.tsx` 对两次客户端超时做真实 15 秒等待，另测试被取消请求和独立迟到提交的交错。模板文件通过同源 fetch 下载，404、坏内容或同步下载异常显示错误；错误行导出同步异常会提示重试。浏览器下载管理器在 click 成功后的异步磁盘故障不能由页面探测。
+所有响应使用 `{ code, data, message? }` 信封，成功时 `code` 为 `0`，错误时返回对应 HTTP 状态和 `message`。预演和确认请求均在 15 秒后停止等待。超时显示提示、保留当前步骤并允许重试；确认重试沿用同一个预演 ID，服务端须以此实现幂等，不能将客户端取消等同于未提交。mock 延迟后检查取消信号，按会话缓存结果处理迟到提交或重复确认。向导按调用者、组织和站点重置界面，卸载时取消尚未结束的预演和确认；切换身份后从上传步骤开始。`wizard.test.tsx` 对两次客户端超时做真实 15 秒等待，另测试换人取消请求、旧数据清理和独立迟到提交的交错。确认成功响应须含已知状态以及一致的非负整数计数，格式错误保留预演并提示重试。模板文件通过同源 fetch 下载，下载前逐行验证编码和非空名称；404、坏内容或同步下载异常显示错误；错误行导出同步异常会提示重试。浏览器下载管理器在 click 成功后的异步磁盘故障不能由页面探测。
 
 | 接口 | 请求体 | 成功响应的 data |
 | --- | --- | --- |

@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Alert, Card, Steps } from 'tdesign-react';
 import { apiPost } from '../../api/client';
-import { CONFIRM_PATH, PREVIEW_PATH, parseImport, readFile, validateFile } from '../../lib/dictImport';
+import { CONFIRM_PATH, PREVIEW_PATH, parseImport, readFile, validateFile, isImportResult } from '../../lib/dictImport';
 import type { ImportResult, Preview, PreviewInput } from '../../lib/dictImport';
 import Step1Upload from './Step1Upload';
 import Step2Preview from './Step2Preview';
@@ -14,26 +14,35 @@ export default function DictImportWizard() {
   const [result, setResult] = useState<ImportResult>();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const pending = useRef(false);
+  const pending = useRef<AbortController | null>(null);
   const step = result ? 2 : preview ? 1 : 0;
+
+  useLayoutEffect(() => () => {
+    const request = pending.current;
+    pending.current = null;
+    request?.abort();
+  }, []);
 
   async function run(operation: (signal: AbortSignal) => Promise<void>) {
     if (pending.current) return;
-    pending.current = true;
+    const request = new AbortController();
+    pending.current = request;
     setBusy(true);
     setError('');
-    const signal = AbortSignal.timeout(15000);
-    try { await operation(signal); }
-    catch (cause) {
-      if (signal.aborted) {
-        setError('请求超时（15 秒），请重试');
-      } else {
-        setError(cause instanceof Error ? cause.message : '操作失败，请重试');
+    const timeout = setTimeout(() => request.abort(), 15000);
+    try {
+      await operation(request.signal);
+    } catch (cause) {
+      if (pending.current === request) {
+        setError(request.signal.aborted ? '请求超时（15 秒），请重试'
+          : cause instanceof Error ? cause.message : '操作失败，请重试');
       }
-    }
-    finally {
-      pending.current = false;
-      setBusy(false);
+    } finally {
+      clearTimeout(timeout);
+      if (pending.current === request) {
+        pending.current = null;
+        setBusy(false);
+      }
     }
   }
 
@@ -53,7 +62,10 @@ export default function DictImportWizard() {
       {result ? <Step3Result result={result} onReset={reset} /> : preview ? (
         <Step2Preview preview={preview} busy={busy} onBack={() => { setError(''); setPreview(undefined); }}
           onConfirm={() => void run(async (signal) => {
-            setResult(await apiPost<{ previewId: string }, ImportResult>(CONFIRM_PATH, { previewId: preview.previewId }, signal));
+            const data = await apiPost<{ previewId: string }, unknown>(CONFIRM_PATH, { previewId: preview.previewId }, signal);
+            signal.throwIfAborted();
+            if (!isImportResult(data)) throw new Error('导入确认响应格式不正确，请重试');
+            setResult(data);
           })} />
       ) : (
         <Step1Upload dictionaryId={dictionaryId} onDictionary={setDictionaryId} file={file} busy={busy}
@@ -62,8 +74,11 @@ export default function DictImportWizard() {
             void run(async (signal) => {
               const format = validateFile(file);
               const content = await readFile(file);
+              signal.throwIfAborted();
               parseImport(format, content);
-              setPreview(await apiPost<PreviewInput, Preview>(PREVIEW_PATH, { dictionaryId, format, content }, signal));
+              const data = await apiPost<PreviewInput, Preview>(PREVIEW_PATH, { dictionaryId, format, content }, signal);
+              signal.throwIfAborted();
+              setPreview(data);
             });
           }} />
       )}

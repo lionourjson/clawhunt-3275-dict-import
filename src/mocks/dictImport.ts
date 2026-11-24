@@ -2,7 +2,7 @@ import { delay, http, HttpResponse } from 'msw';
 import { config } from '../config';
 import { canImport, resolveDemoActor } from '../auth/demoAuth';
 import type { DemoActor } from '../auth/demoAuth';
-import { dictionaries, MAX_IMPORT_BYTES, parseImport } from '../lib/dictImport';
+import { dictionaries, isValidEntry, MAX_IMPORT_BYTES, parseImport } from '../lib/dictImport';
 import type { Entry, ImportResult, Preview, PreviewInput } from '../lib/dictImport';
 import { PREVIEW_PATH, CONFIRM_PATH } from '../lib/dictImport';
 
@@ -68,7 +68,7 @@ export function createDictImportHandlers({ failConfirm = false, delayMs = 0, con
       });
       for (const row of normalized) {
         const { code, name } = row;
-        if (!/^[a-zA-Z0-9_-]+$/.test(code) || !name) {
+        if (!isValidEntry(row)) {
           preview.groups.错误.push({ ...row, reason: 'code 必须为字母、数字、下划线或连字符，name 不能为空' });
         } else if ((counts.get(code) ?? 0) > 1 || archived.has(code)) {
           preview.groups.冲突.push({ ...row, reason: archived.has(code) ? '该条目已归档' : '文件中 code 重复' });
