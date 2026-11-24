@@ -16,12 +16,33 @@ export interface Preview { previewId: string; ownerId: string; orgId: string; si
 export interface ImportResult { status: 'success' | 'partial'; added: number; updated: number; succeeded: number; failed: number }
 export interface PreviewInput { dictionaryId: string; format: ImportFormat; content: string }
 
-export function isImportResult(value: unknown): value is ImportResult {
+const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+function isPreviewRow(value: unknown): value is PreviewRow {
+  if (typeof value !== 'object' || value === null) return false;
+  const { line, raw, code, name, reason } = value as Partial<PreviewRow>;
+  return isCount(line) && line > 0 && typeof raw === 'string' && typeof code === 'string'
+    && typeof name === 'string' && typeof reason === 'string';
+}
+
+export function isPreview(value: unknown, actor: { id: string; orgId: string; siteId: string }): value is Preview {
+  if (typeof value !== 'object' || value === null) return false;
+  const { previewId, ownerId, orgId, siteId, groups } = value as Partial<Preview>;
+  if (typeof previewId !== 'string' || !previewId.trim() || ownerId !== actor.id || orgId !== actor.orgId || siteId !== actor.siteId) {
+    return false;
+  }
+  return typeof groups === 'object' && groups !== null
+    && kinds.every((kind) => Array.isArray(groups[kind]) && groups[kind].every(isPreviewRow));
+}
+
+export function isImportResult(value: unknown, { groups }: Preview): value is ImportResult {
   if (typeof value !== 'object' || value === null) return false;
   const { status, added, updated, succeeded, failed } = value as Partial<ImportResult>;
-  const validCount = (count: unknown): count is number => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0;
-  if (!validCount(added) || !validCount(updated) || !validCount(succeeded) || !validCount(failed)) return false;
-  return added + updated === succeeded && (status === 'success' && failed === 0 || status === 'partial' && failed > 0);
+  if (!isCount(added) || !isCount(updated) || !isCount(succeeded) || !isCount(failed)) return false;
+  return succeeded > 0 && added + updated === succeeded
+    && added === groups.新增.length && updated === groups.更新.length
+    && failed === groups.冲突.length + groups.错误.length
+    && status === (failed > 0 ? 'partial' : 'success');
 }
 
 export function isValidEntry(value: unknown): boolean {

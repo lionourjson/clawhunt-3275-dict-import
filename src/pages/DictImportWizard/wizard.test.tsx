@@ -139,6 +139,61 @@ describe('向导上传与下载', () => {
     expect(screen.getByText('成功 2 条，失败 2 条')).toBeInTheDocument();
   });
 
+  it('多行 CSV 记录后保留错误行的物理行号和引号，预演可正常显示', async () => {
+    server.use(...createDictImportHandlers());
+    const source = 'code,name\r\nvalid_code,"第一行\r\n第二行"\r\nbad code,"含有""引号""的名称"';
+    const { container } = render(<Wizard />);
+    chooseDictionary();
+    selectFile(container, makeFile(source));
+    await screen.findByText(/已选择 fixture.csv/);
+    fireEvent.click(screen.getByRole('button', { name: '生成预演' }));
+    await screen.findByRole('heading', { name: '新增明细' });
+    expect(screen.getByText('第一行 第二行')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('错误（1）'));
+    expect(screen.getByRole('cell', { name: '4' })).toBeInTheDocument();
+    expect(screen.getByText('bad code,"含有""引号""的名称"')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下载错误行 CSV' })).toBeEnabled();
+  });
+
+  const previewRow = { line: 2, raw: 'demo_new,环轨材料', code: 'demo_new', name: '环轨材料', reason: '将创建条目' };
+  const previewGroups = { 新增: [previewRow], 更新: [], 冲突: [], 错误: [] };
+  const previewPayload = {
+    previewId: 'demo-preview', ownerId: 'operator-1', orgId: 'org-demo-001', siteId: 'site-demo-001', groups: previewGroups,
+  };
+
+  it.each([
+    ['空对象', {}],
+    ['预演 ID 为空', { ...previewPayload, previewId: ' ' }],
+    ['预演 ID 类型错误', { ...previewPayload, previewId: 5 }],
+    ['另一调用者', { ...previewPayload, ownerId: 'operator-4' }],
+    ['组织缺失', { ...previewPayload, orgId: null }],
+    ['其他站点', { ...previewPayload, siteId: 'site-demo-002' }],
+    ['缺分组', { ...previewPayload, groups: null }],
+    ['错误分组不是数组', { ...previewPayload, groups: { ...previewGroups, 错误: {} } }],
+    ['缺少冲突分组', { ...previewPayload, groups: { 新增: [], 更新: [], 错误: [] } }],
+    ['行为空', { ...previewPayload, groups: { ...previewGroups, 新增: [null] } }],
+    ...Object.entries({ line: 0, raw: null, code: 3, name: false, reason: [] }).map(([field, value]) => [
+      `错误行 ${field} 无效`, { ...previewPayload, groups: { ...previewGroups, 错误: [{ ...previewRow, [field]: value }] } },
+    ] as const),
+  ] as const)('预演 HTTP 200/%s 保留选定字典和文件并允许重试', async (_, data) => {
+    server.use(...createDictImportHandlers());
+    server.use(http.post('*/api/taxonomy/import/preview', () => HttpResponse.json({ code: 0, data }), { once: true }));
+    const { container } = render(<Wizard />);
+    chooseDictionary();
+    selectFile(container, makeFile(fixture));
+    await screen.findByText(/已选择 fixture.csv/);
+    const previewButton = () => screen.getByRole('button', { name: '生成预演' });
+    fireEvent.click(previewButton());
+    expect(await screen.findByRole('alert')).toHaveTextContent('预演响应格式或归属不正确，请重试');
+    expect(screen.getByRole('heading', { name: '选择字典并上传文件' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '预演结果' })).not.toBeInTheDocument();
+    expect(screen.getByText(/已选择 fixture.csv/)).toBeInTheDocument();
+    await waitFor(() => expect(previewButton()).toBeEnabled());
+    fireEvent.click(previewButton());
+    expect(await screen.findByRole('heading', { name: '新增明细' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it.each([
     ['空响应信封', null],
     ['缺少所有字段', { code: 0, data: {} }],
@@ -149,7 +204,11 @@ describe('向导上传与下载', () => {
     ['字符串计数', { code: 0, data: { status: 'partial', added: '1', updated: 1, succeeded: 2, failed: 2 } }],
     ['计数总和矛盾', { code: 0, data: { status: 'partial', added: 1, updated: 1, succeeded: 3, failed: 2 } }],
     ['状态与失败数矛盾', { code: 0, data: { status: 'success', added: 1, updated: 1, succeeded: 2, failed: 2 } }],
-  ])('确认 HTTP 200/%s 保留预演并用同一预演重试', async (_, envelope) => {
+    ['新增与更新不符', { code: 0, data: { status: 'partial', added: 2, updated: 0, succeeded: 2, failed: 2 } }],
+    ['跳过数不符', { code: 0, data: { status: 'partial', added: 1, updated: 1, succeeded: 2, failed: 1 } }],
+    ['漏报冲突和错误的全成功', { code: 0, data: { status: 'success', added: 1, updated: 1, succeeded: 2, failed: 0 } }],
+    ['单条预演返回全零', { code: 0, data: { status: 'success', added: 0, updated: 0, succeeded: 0, failed: 0 } }],
+  ])('确认 HTTP 200/%s 保留预演并用同一预演重试', async (scenario, envelope) => {
     server.use(...createDictImportHandlers());
     const attempted = vi.fn();
     server.use(http.post('*/api/taxonomy/import/confirm', async ({ request }) => {
@@ -157,8 +216,9 @@ describe('向导上传与下载', () => {
       return HttpResponse.json(envelope);
     }, { once: true }));
     const { container } = render(<Wizard />);
+    const singleRow = scenario === '单条预演返回全零';
     chooseDictionary();
-    selectFile(container, makeFile(fixture));
+    selectFile(container, makeFile(singleRow ? 'code,name\ndemo_new,环轨材料' : fixture));
     await screen.findByText(/已选择 fixture.csv/);
     fireEvent.click(screen.getByRole('button', { name: '生成预演' }));
     await screen.findByRole('heading', { name: '预演结果' });
@@ -170,7 +230,7 @@ describe('向导上传与下载', () => {
     expect(button).toBeEnabled();
     const fetchCall = vi.spyOn(globalThis, 'fetch');
     fireEvent.click(button);
-    expect(await screen.findByText('成功 2 条，失败 2 条')).toBeInTheDocument();
+    expect(await screen.findByText(singleRow ? '成功 1 条，失败 0 条' : '成功 2 条，失败 2 条')).toBeInTheDocument();
     expect(JSON.parse(fetchCall.mock.calls[0][1]!.body as string)).toEqual(attempted.mock.calls[0][0]);
   });
 

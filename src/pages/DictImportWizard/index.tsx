@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Alert, Card, Steps } from 'tdesign-react';
 import { apiPost } from '../../api/client';
-import { CONFIRM_PATH, PREVIEW_PATH, parseImport, readFile, validateFile, isImportResult } from '../../lib/dictImport';
+import { canImport, currentDemoActor } from '../../auth/demoAuth';
+import { CONFIRM_PATH, PREVIEW_PATH, isImportResult, isPreview, parseImport, readFile, validateFile } from '../../lib/dictImport';
 import type { ImportResult, Preview, PreviewInput } from '../../lib/dictImport';
 import Step1Upload from './Step1Upload';
 import Step2Preview from './Step2Preview';
@@ -64,7 +65,7 @@ export default function DictImportWizard() {
           onConfirm={() => void run(async (signal) => {
             const data = await apiPost<{ previewId: string }, unknown>(CONFIRM_PATH, { previewId: preview.previewId }, signal);
             signal.throwIfAborted();
-            if (!isImportResult(data)) throw new Error('导入确认响应格式不正确，请重试');
+            if (!isImportResult(data, preview)) throw new Error('导入确认响应格式不正确，请重试');
             setResult(data);
           })} />
       ) : (
@@ -76,8 +77,10 @@ export default function DictImportWizard() {
               const content = await readFile(file);
               signal.throwIfAborted();
               parseImport(format, content);
-              const data = await apiPost<PreviewInput, Preview>(PREVIEW_PATH, { dictionaryId, format, content }, signal);
+              const data = await apiPost<PreviewInput, unknown>(PREVIEW_PATH, { dictionaryId, format, content }, signal);
               signal.throwIfAborted();
+              const actor = currentDemoActor();
+              if (!canImport(actor) || !isPreview(data, actor)) throw new Error('预演响应格式或归属不正确，请重试');
               setPreview(data);
             });
           }} />
