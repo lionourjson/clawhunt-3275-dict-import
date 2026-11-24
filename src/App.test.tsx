@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import App from './App';
+import { setDemoActor } from './auth/demoAuth';
 
 describe('App（路由 + 布局冒烟）', () => {
   it('默认跳转到字典导入向导', async () => {
@@ -11,6 +12,19 @@ describe('App（路由 + 布局冒烟）', () => {
     expect(screen.getByText('会员列表')).toBeInTheDocument();
     expect(screen.getByText('标签树')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '选择字典并上传文件' })).toBeInTheDocument();
+  });
+
+  it('匿名和只读身份不能打开向导，运营身份可进入；换人时预演被卸载', async () => {
+    setDemoActor(null);
+    window.history.replaceState({}, '', '/admin/taxonomy/import');
+    render(<App />);
+    expect(screen.getByRole('heading', { name: '无权访问字典导入' })).toBeInTheDocument();
+    setDemoActor('demo-viewer');
+    expect(await screen.findByRole('heading', { name: '无权访问字典导入' })).toBeInTheDocument();
+    setDemoActor('demo-operator');
+    expect(await screen.findByRole('heading', { name: '字典导入向导' })).toBeInTheDocument();
+    setDemoActor(null);
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '字典导入向导' })).toBeNull());
   });
 
   it('演示页合计储值以分计算（前 5 条之和 = 185175 分）', async () => {

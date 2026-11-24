@@ -1,7 +1,8 @@
 import '@testing-library/jest-dom/vitest';
 import { setupServer } from 'msw/node';
 import { createHandlers } from './mocks/handlers';
-import { afterAll, afterEach, beforeAll } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
+import { setDemoActor } from './auth/demoAuth';
 
 // jsdom 缺失 matchMedia / ResizeObserver / HTMLCanvasElement.getContext，TDesign 依赖它们
 if (typeof window !== 'undefined' && !window.matchMedia) {
@@ -38,5 +39,6 @@ if (typeof window !== 'undefined' && !window.URL.createObjectURL) {
 export const server = setupServer(...createHandlers({ scenario: 'success' }));
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeEach(() => setDemoActor('demo-operator'));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());

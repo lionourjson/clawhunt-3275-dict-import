@@ -5,6 +5,7 @@ import MemberListPage from './pages/MemberListPage';
 import MemberFormPage from './pages/MemberFormPage';
 import DictImportWizard from './pages/DictImportWizard';
 import TagTreePage from './pages/TagTreePage';
+import ImportGuard from './auth/ImportGuard';
 
 /** 路由：统一挂在 /admin 下。真实接入时把 MSW 换成真实 API（见 README 集成点）。 */
 export default function App() {
@@ -16,7 +17,7 @@ export default function App() {
           <Route path="/admin/members" element={<MemberListPage />} />
           <Route path="/admin/members/new" element={<MemberFormPage />} />
           <Route path="/admin/tags" element={<TagTreePage />} />
-          <Route path="/admin/taxonomy/import" element={<DictImportWizard />} />
+          <Route path="/admin/taxonomy/import" element={<ImportGuard><DictImportWizard /></ImportGuard>} />
           <Route path="*" element={<Navigate to="/admin/taxonomy/import" replace />} />
         </Route>
       </Routes>

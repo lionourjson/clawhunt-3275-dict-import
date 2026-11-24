@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button, Space, Table, Tabs } from 'tdesign-react';
+import { canImport, currentDemoActor } from '../../auth/demoAuth';
 import { downloadErrors, kinds } from '../../lib/dictImport';
 import type { Kind, Preview } from '../../lib/dictImport';
 
@@ -13,7 +14,17 @@ interface Props {
 export default function Step2Preview({ preview, busy, onBack, onConfirm }: Props) {
   const [kind, setKind] = useState<Kind>('新增');
   const [page, setPage] = useState(1);
+  const [downloadError, setDownloadError] = useState('');
   const rows = preview.groups[kind];
+  function exportErrors() {
+    const actor = currentDemoActor();
+    if (!canImport(actor) || actor.id !== preview.ownerId || actor.orgId !== preview.orgId || actor.siteId !== preview.siteId) {
+      setDownloadError('当前身份无权下载此预演的错误行');
+      return;
+    }
+    try { downloadErrors(rows); setDownloadError(''); }
+    catch { setDownloadError('错误行下载失败，请重试'); }
+  }
   const canConfirm = preview.groups.新增.length + preview.groups.更新.length > 0;
   const pageSize = 10;
   return (
@@ -36,9 +47,10 @@ export default function Step2Preview({ preview, busy, onBack, onConfirm }: Props
         ]} />
       <Space style={{ flexWrap: 'wrap', marginTop: 20 }}>
         <Button variant="outline" disabled={busy} onClick={onBack}>返回上传</Button>
-        {kind === '错误' && rows.length > 0 && <Button variant="outline" onClick={() => downloadErrors(rows)}>下载错误行 CSV</Button>}
+        {kind === '错误' && rows.length > 0 && <Button variant="outline" onClick={exportErrors}>下载错误行 CSV</Button>}
         <Button tag="button" loading={busy} disabled={!canConfirm || busy} onClick={onConfirm}>确认导入</Button>
       </Space>
+      {downloadError && <p role="alert">{downloadError}</p>}
       {!canConfirm && <p>没有可导入的行，请修正文件后重新预演。</p>}
     </section>
   );

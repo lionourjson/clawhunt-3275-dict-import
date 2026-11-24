@@ -32,7 +32,12 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   browser = await chromium.launch({ executablePath: browserPath });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+  await page.addInitScript(() => sessionStorage.setItem('dict-import-demo-actor', 'demo-operator'));
+  const external = [];
+  page.on('request', (request) => {
+    if (!request.url().startsWith(base) && !request.url().startsWith('blob:')) external.push(request.url());
+  });
   const shot = async (file, marker) => {
     await page.waitForSelector(`text=${marker}`);
     await page.evaluate(() => document.fonts.ready);
@@ -40,6 +45,27 @@ try {
     console.log(`[shots] ${file} ${marker}`);
   };
   await page.goto(`${base}/admin/taxonomy/import`);
+  // Intercept browser fetch before MSW's service worker, which handles network before Playwright routing.
+  await page.evaluate(() => {
+    const original = window.fetch.bind(window);
+    window.fetch = ((input, init) => {
+      if (String(input).includes('dict_import_template.csv')) return Promise.resolve(new Response('', { status: 404 }));
+      return original(input, init);
+    });
+  });
+  await page.getByRole('button', { name: '下载 CSV 模板' }).click();
+  await page.getByText('模板下载失败：HTTP 404，请稍后重试').waitFor();
+  await page.reload();
+  await page.getByRole('heading', { name: '字典导入向导' }).waitFor();
+  console.log('[shots] 静态模板 404 显示失败提示');
+  for (const [format, name] of [['CSV', 'dict_import_template.csv'], ['JSON', 'dict_import_template.json']]) {
+    const pendingDownload = page.waitForEvent('download');
+    await page.getByRole('button', { name: `下载 ${format} 模板` }).click();
+    const template = await pendingDownload;
+    assert.equal(template.suggestedFilename(), name);
+    assert.equal(readFileSync(await template.path(), 'utf8').trim(), readFileSync(path.join(root, 'public/templates', name), 'utf8').trim());
+    console.log(`[shots] 浏览器已核对 ${format} 模板下载`);
+  }
   await page.getByPlaceholder('请选择字典').click();
   await page.getByText('行业字典', { exact: true }).click();
   await page.locator('input[type=file]').setInputFiles({
@@ -65,6 +91,8 @@ try {
   console.log('[shots] 已核对浏览器下载的错误行 CSV');
   await page.getByRole('button', { name: '确认导入' }).click();
   await shot('03-result.png', '成功 2 条，失败 2 条');
+  assert.deepEqual(external, []);
+  console.log('[shots] 此浏览器流程无站外请求');
 } finally {
   await browser?.close();
   server.kill();

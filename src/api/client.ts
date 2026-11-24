@@ -1,5 +1,7 @@
 /** 统一 API 客户端：基地址从环境变量读取；超时与错误处理集中在这里。 */
 import { config } from '../config';
+import { currentDemoActor } from '../auth/demoAuth';
+import { CONFIRM_PATH, PREVIEW_PATH } from '../lib/dictImport';
 
 export interface ApiEnvelope<T> {
   code: number;
@@ -27,9 +29,11 @@ export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> 
 }
 
 export async function apiPost<TBody extends object, T>(path: string, body: TBody, signal?: AbortSignal): Promise<T> {
+  const isImport = path === PREVIEW_PATH || path === CONFIRM_PATH;
+  const actor = isImport ? currentDemoActor() : null;
   const res = await fetch(`${config.apiBaseUrl}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(actor ? { 'X-Demo-Actor': actor.token } : {}) },
     body: JSON.stringify(body),
     signal,
   });

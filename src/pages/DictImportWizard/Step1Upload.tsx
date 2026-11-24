@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { Button, Select, Space, Upload } from 'tdesign-react';
-import { dictionaries, MAX_IMPORT_BYTES, validateFile } from '../../lib/dictImport';
+import { dictionaries, downloadTemplate, MAX_IMPORT_BYTES, validateFile } from '../../lib/dictImport';
 
 interface Props {
   dictionaryId: string;
@@ -12,6 +13,15 @@ interface Props {
 }
 
 export default function Step1Upload({ dictionaryId, onDictionary, onFile, onError, file, busy, onPreview }: Props) {
+  const [downloading, setDownloading] = useState(false);
+  async function getTemplate(format: 'csv' | 'json') {
+    if (downloading) return;
+    setDownloading(true);
+    onError('');
+    try { await downloadTemplate(format); }
+    catch (cause) { onError(cause instanceof Error ? cause.message : '模板下载失败，请重试'); }
+    finally { setDownloading(false); }
+  }
   return (
     <section>
       <h2>选择字典并上传文件</h2>
@@ -40,8 +50,8 @@ export default function Step1Upload({ dictionaryId, onDictionary, onFile, onErro
           {file && <p aria-live="polite">已选择 {file.name}（{file.size.toLocaleString()} 字节）</p>}
         </div>
         <Space style={{ flexWrap: 'wrap' }}>
-          <Button variant="text" tag="a" href="/templates/dict_import_template.csv" download="dict_import_template.csv">下载 CSV 模板</Button>
-          <Button variant="text" tag="a" href="/templates/dict_import_template.json" download="dict_import_template.json">下载 JSON 模板</Button>
+          <Button variant="text" disabled={downloading} onClick={() => void getTemplate('csv')}>下载 CSV 模板</Button>
+          <Button variant="text" disabled={downloading} onClick={() => void getTemplate('json')}>下载 JSON 模板</Button>
         </Space>
         <Button tag="button" loading={busy} disabled={!file || !dictionaryId || busy} onClick={onPreview}>生成预演</Button>
       </Space>

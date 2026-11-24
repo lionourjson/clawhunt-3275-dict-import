@@ -12,7 +12,7 @@ export type ImportFormat = 'csv' | 'json';
 export interface Entry { code: string; name: string }
 interface ParsedRow { line: number; raw: string; value: unknown }
 export interface PreviewRow { line: number; raw: string; code: string; name: string; reason: string }
-export interface Preview { previewId: string; groups: Record<Kind, PreviewRow[]> }
+export interface Preview { previewId: string; ownerId: string; orgId: string; siteId: string; groups: Record<Kind, PreviewRow[]> }
 export interface ImportResult { status: 'success' | 'partial'; added: number; updated: number; succeeded: number; failed: number }
 export interface PreviewInput { dictionaryId: string; format: ImportFormat; content: string }
 
@@ -112,11 +112,29 @@ export function errorCsv(rows: PreviewRow[]) {
   )).join('\r\n') + '\r\n';
 }
 
+function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = name;
+    anchor.click();
+  } finally {
+    // Keep the object URL alive long enough for the browser download to start.
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+}
+
 export function downloadErrors(rows: PreviewRow[]) {
-  const url = URL.createObjectURL(new Blob([errorCsv(rows)], { type: 'text/csv;charset=utf-8' }));
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = 'dict_import_errors.csv';
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(new Blob([errorCsv(rows)], { type: 'text/csv;charset=utf-8' }), 'dict_import_errors.csv');
+}
+
+export async function downloadTemplate(format: ImportFormat) {
+  const name = `dict_import_template.${format}`;
+  const response = await fetch(new URL(`/templates/${name}`, window.location.href), { signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw new Error(`模板下载失败：HTTP ${response.status}，请稍后重试`);
+  const text = await response.text();
+  const rows = parseImport(format, text);
+  if (!rows.length) throw new Error('模板文件没有数据，请稍后重试');
+  downloadBlob(new Blob([text], { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8' }), name);
 }
